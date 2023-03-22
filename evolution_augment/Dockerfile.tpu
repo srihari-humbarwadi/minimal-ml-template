@@ -1,0 +1,14 @@
+FROM gcr.io/tpu-pytorch/xla:r1.13_3.8_tpuvm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt update && \
+    apt install -y software-properties-common curl
+
+COPY ./requirements_tpu.txt /tmp
+
+RUN pip3 install -r /tmp/requirements_tpu.txt
+
+COPY ./* /workspace/evolution_augment/
+
+CMD [ "/workspace/venv/bin/python3",  "-m",  "evolution_augment" ]

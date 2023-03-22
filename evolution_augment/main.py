@@ -40,8 +40,7 @@ class Transforms:
         example['img'] = [self.transforms(example['img'][0])]
         return example
 
-
-if __name__ == '__main__':
+def main():
     EXPERIMENT_NAME = 'debug_cifar10'
     CURRENT_EXPERIMENT_DIR = os.path.join(os.sep, 'tmp', EXPERIMENT_NAME)
 
@@ -56,7 +55,7 @@ if __name__ == '__main__':
     EPOCHS = 200
     TRAIN_STEPS = int(EPOCHS * TRAIN_SAMPLES / BATCH_SIZE)
     WARMUP_STEPS = int(5 * TRAIN_SAMPLES / BATCH_SIZE)
-    WORKERS = 1
+    WORKERS = 32
 
     logger = get_logger(__name__)
 
@@ -143,3 +142,6 @@ if __name__ == '__main__':
         resume=True,
     )
     experiment.run()
+
+if __name__ == '__main__':
+    main()
