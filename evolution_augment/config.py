@@ -192,8 +192,64 @@ def wideresnet28x18_randaugment_cifar10_bs256_ep200():
                                   num_warmup_steps=warmup_iters),
             scheduler_interval=callbacks.Interval.STEP),
         train_iters=train_iters,
-        evaluate_every_n_steps=iters_per_epoch,
-        checkpoint_every_n_steps=iters_per_epoch,
+        evaluate_every_n_steps=200,
+        checkpoint_every_n_steps=int(train_iters / 10),
+        checkpoint_after_validation=False)
+
+    return config
+
+
+def wideresnet28x18_randaugment_cifar100_bs256_ep200():
+    dataset = Dataset(name='cifar100',
+                      num_classes=100,
+                      num_train_samples=50000,
+                      num_val_samples=10000,
+                      label_key='fine_label'
+                      image_means=(0.4914, 0.4822, 0.4465),
+                      image_stds=(0.2023, 0.1994, 0.2010))
+    train_batch_size = 256
+    val_batch_size = 256
+
+    epochs = 200
+    iters_per_epoch = int(dataset.num_train_samples / train_batch_size)
+    train_iters = int(epochs * dataset.num_train_samples / train_batch_size)
+    warmup_iters = int(5 * dataset.num_train_samples / train_batch_size)
+
+    config = Experiment(
+        experiment_name='wideresnet28x18_randaugment_cifar100_bs256_ep200',
+        experiment_dir='/home/exps/wideresnet28x18_randaugment_cifar100_bs256_ep200',
+        model=WideResNet(num_classes=dataset.num_classes,
+                         depth=28,
+                         widen_factor=10,
+                         dropout_rate=0.0),
+        train_dataloader=Dataloader(
+            dataset=dataset,
+            batch_size=train_batch_size,
+            output_size=(32, 32),
+            augmentation=Augmentation(
+                random_crop=RandomCrop(size=32, padding=4),
+                cutout=CutoutDefault(length=16),
+                rand_augment=RandAugment(num_ops=2, magnitude=14)),
+            is_training=True,
+            num_workers=os.cpu_count() // 2),
+        val_dataloaders=Dataloader(
+            dataset=dataset,
+            batch_size=val_batch_size,
+            output_size=(32, 32),
+            num_workers=os.cpu_count() // 2,
+            is_training=False),
+        trainers=ClassificationTrainer(
+            optimizer=SGD(lr=0.2,
+                          weight_decay=0.0005,
+                          momentum=0.9,
+                          nesterov=True),
+            scheduler=LRScheduler(name='cosine',
+                                  num_training_steps=train_iters,
+                                  num_warmup_steps=warmup_iters),
+            scheduler_interval=callbacks.Interval.STEP),
+        train_iters=train_iters,
+        evaluate_every_n_steps=200,
+        checkpoint_every_n_steps=int(train_iters / 10),
         checkpoint_after_validation=False)
 
     return config
