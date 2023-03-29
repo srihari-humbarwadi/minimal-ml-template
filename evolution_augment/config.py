@@ -144,7 +144,7 @@ class Experiment:
     resume: bool = True
 
 
-def wideresnet28x18_randaugment_cifar10_256_200ep():
+def wideresnet28x18_randaugment_cifar10_bs256_ep200():
     dataset = Dataset(name='cifar10',
                       num_classes=10,
                       num_train_samples=50000,
@@ -160,8 +160,8 @@ def wideresnet28x18_randaugment_cifar10_256_200ep():
     warmup_iters = int(5 * dataset.num_train_samples / train_batch_size)
 
     config = Experiment(
-        experiment_name='wideresnet28x18_randaugment_cifar10_256_200ep',
-        experiment_dir='/tmp/wideresnet28x18_randaugment_cifar10_256_200ep',
+        experiment_name='wideresnet28x18_randaugment_cifar10_bs256_ep200',
+        experiment_dir='/home/exps/wideresnet28x18_randaugment_cifar10_bs256_ep200',
         model=WideResNet(num_classes=dataset.num_classes,
                          depth=28,
                          widen_factor=10,
@@ -183,7 +183,7 @@ def wideresnet28x18_randaugment_cifar10_256_200ep():
             num_workers=os.cpu_count() // 2,
             is_training=False),
         trainers=ClassificationTrainer(
-            optimizer=SGD(lr=0.1,
+            optimizer=SGD(lr=0.2,
                           weight_decay=0.0005,
                           momentum=0.9,
                           nesterov=True),
