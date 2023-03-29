@@ -15,11 +15,11 @@ from evolution_augment import models
 from evolution_augment import optimizers
 
 if __name__ == '__main__':
-    experiment_cfg = config.wideresnet28x18_randaugment_cifar10_256_200ep()
+    experiment_cfg = config.wideresnet28x18_randaugment_cifar10_bs256_ep200()
 
     os.makedirs(experiment_cfg.experiment_dir, exist_ok=True)
     wandb.init(
-        name='wideresnet28x18_randaugment_cifar10_256_200ep-[{}]'.format(
+        name='wideresnet28x18_randaugment_cifar10_bs256_ep200-[{}]'.format(
             datetime.now().strftime('%d-%m-%Y|%H:%M:%S')),
         project=os.environ.get('WANDB_PROJECT',
                                experiment_cfg.train_dataloader.dataset.name),
