@@ -107,4 +107,4 @@ class cifar100(_CifarBase):
 
     def __init__(self, config):
         config['name'] = 'cifar100'
-        super(cifar10, self).__init__(config=config)
+        super(cifar100, self).__init__(config=config)
