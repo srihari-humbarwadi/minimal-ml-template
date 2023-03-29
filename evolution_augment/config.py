@@ -204,7 +204,7 @@ def wideresnet28x18_randaugment_cifar100_bs256_ep200():
                       num_classes=100,
                       num_train_samples=50000,
                       num_val_samples=10000,
-                      label_key='fine_label'
+                      label_key='fine_label',
                       image_means=(0.4914, 0.4822, 0.4465),
                       image_stds=(0.2023, 0.1994, 0.2010))
     train_batch_size = 256
