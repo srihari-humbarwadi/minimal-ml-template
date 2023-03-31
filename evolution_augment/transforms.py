@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torchvision import transforms
+import torch.nn.functional as F
 
 class CutoutDefault(object):
     """
@@ -26,6 +27,42 @@ class CutoutDefault(object):
         img *= mask
         return img
 
+
+class EvolutionAugmentV2:
+    def __init__(self, num_candidates, num_ops, magnitude, cutout_length, mean, std):
+        self.num_candidates = num_candidates
+        self.num_ops = num_ops,
+        self.magnitude = magnitude
+        self.cutout_length = cutout_length
+        
+        self.means = mean
+        self.stds = std
+        
+        self._rand_augment = transforms.RandAugment(
+            num_ops=num_ops, magnitude=magnitude)
+        self._cutout = CutoutDefault(length=cutout_length)
+        self._normlize_fn = transforms.Normalize(mean=mean, std=std)
+        
+    def _get_greedy_batch(self, model, images, labels):
+        model.eval()
+        greedy_batch = images.detach().clone()
+        greedy_losses = torch.zeros_like(labels, dtype=torch.float)
+
+        for _ in range(self.num_candidates):
+            augmented_images = self._rand_augment((images * 255).to(torch.uint8)).to(images.dtype) / 255.0
+            logits = model(augmented_images)
+            loss = F.cross_entropy(logits, labels, reduction='none').detach()
+            greedy_batch = torch.where(
+                loss.view(-1, 1, 1, 1) > greedy_losses.view(-1, 1, 1, 1),
+                augmented_images, greedy_batch)
+            greedy_losses = torch.where(
+                loss > greedy_losses,
+                loss, greedy_losses)
+        return greedy_batch
+    
+    def __call__(self, model, images, labels):
+        greedy_batch = self._get_greedy_batch(model, images, labels)
+        return self._normlize_fn(greedy_batch)
 
 class RandAugmentV2(transforms.RandAugment):
     _SUPPORTED_OPS = {
