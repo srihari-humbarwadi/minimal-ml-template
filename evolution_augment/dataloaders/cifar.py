@@ -59,17 +59,28 @@ class _CifarBase:
         if is_training:
             print('Constructing transforms for train mode')
             aug_cfg = self.config['augmentation']
-            self.transforms = transforms.Compose([
-                transforms.RandAugment(
-                    num_ops=aug_cfg['rand_augment']['num_ops'],
-                    magnitude=aug_cfg['rand_augment']['magnitude']),
-                transforms.RandomCrop(
-                    size=aug_cfg['random_crop']['size'],
-                    padding=aug_cfg['random_crop']['padding']),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(), normalize,
-                CutoutDefault(length=aug_cfg['cutout']['length'])
-            ])
+            if aug_cfg['rand_augment'] is not None:
+                print('Using RandAugment transforms for train mode')
+                self.transforms = transforms.Compose([
+                    transforms.RandAugment(
+                        num_ops=aug_cfg['rand_augment']['num_ops'],
+                        magnitude=aug_cfg['rand_augment']['magnitude']),
+                    transforms.RandomCrop(
+                        size=aug_cfg['random_crop']['size'],
+                        padding=aug_cfg['random_crop']['padding']),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(), normalize,
+                    CutoutDefault(length=aug_cfg['cutout']['length'])
+                ])
+            else:
+                print('Using EvolutionAugment transforms for train mode')
+                self.transforms = transforms.Compose([
+                    transforms.RandomCrop(
+                        size=aug_cfg['random_crop']['size'],
+                        padding=aug_cfg['random_crop']['padding']),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                ])                
         else:
             print('Constructing transforms for test mode')
             self.transforms = transforms.Compose([
