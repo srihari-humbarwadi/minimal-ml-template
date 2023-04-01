@@ -12,19 +12,18 @@ class CutoutDefault(object):
 
     def __call__(self, img):
         h, w = img.size(1), img.size(2)
-        mask = np.ones((h, w), np.float32)
-        y = np.random.randint(h)
-        x = np.random.randint(w)
+        mask = torch.ones((h, w), dtype=img.dtype)
+        y = torch.randint(h, (1,))
+        x = torch.randint(w, (1,))
 
-        y1 = np.clip(y - self.length // 2, 0, h)
-        y2 = np.clip(y + self.length // 2, 0, h)
-        x1 = np.clip(x - self.length // 2, 0, w)
-        x2 = np.clip(x + self.length // 2, 0, w)
+        y1 = torch.clamp(y - self.length // 2, 0, h)
+        y2 = torch.clamp(y + self.length // 2, 0, h)
+        x1 = torch.clamp(x - self.length // 2, 0, w)
+        x2 = torch.clamp(x + self.length // 2, 0, w)
 
         mask[y1: y2, x1: x2] = 0.
-        mask = torch.from_numpy(mask)
         mask = mask.expand_as(img)
-        img *= mask
+        img = img * mask
         return img
 
 
@@ -45,13 +44,14 @@ class EvolutionAugmentV2:
         
     def _get_greedy_batch(self, model, images, labels):
         model.eval()
-        greedy_batch = images.detach().clone()
-        greedy_losses = torch.zeros_like(labels, dtype=torch.float)
+        greedy_batch = torch.zeros_like(images, dtype=images.dtype)
+        greedy_losses = torch.zeros_like(labels, dtype=images.dtype)
 
         for _ in range(self.num_candidates):
-            augmented_images = self._rand_augment((images * 255).to(torch.uint8)).to(images.dtype) / 255.0
+            augmented_images = self._normlize_fn(
+                self._rand_augment((images * 255).to(torch.uint8)).to(images.dtype) / 255.0)
             logits = model(augmented_images)
-            loss = F.cross_entropy(logits, labels, reduction='none').detach()
+            loss = F.cross_entropy(logits, labels, reduction='none')
             greedy_batch = torch.where(
                 loss.view(-1, 1, 1, 1) > greedy_losses.view(-1, 1, 1, 1),
                 augmented_images, greedy_batch)
@@ -61,8 +61,10 @@ class EvolutionAugmentV2:
         return greedy_batch
     
     def __call__(self, model, images, labels):
-        greedy_batch = self._get_greedy_batch(model, images, labels)
-        return self._normlize_fn(greedy_batch)
+        with torch.no_grad():
+            greedy_batch = self._get_greedy_batch(model, images, labels)
+            # greedy_batch = [self._cutout(img) for img in greedy_batch]
+        return greedy_batch
 
 class RandAugmentV2(transforms.RandAugment):
     _SUPPORTED_OPS = {
