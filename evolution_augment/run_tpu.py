@@ -92,42 +92,46 @@ def mp_fn(index, experiment_cfg):
                 train_progress_bar.update(1)
 
             if train_iteration % experiment_cfg.evaluate_every_n_steps == 0:
+                model.eval()
+
                 if xm.is_master_ordinal():
                     train_progress_bar.close()
                     val_progress_bar = tqdm(total=len(mp_val_dataloader))
 
                 validation_accuracies = []
                 validation_losses = []
-                for val_iteration, batch in enumerate(mp_val_dataloader):
-                    images = batch['pixel_values'].to(device)
-                    labels = batch['labels'].to(device)
-                    logits = model(images)
-                    loss = criterion(logits, labels)
+                with torch.no_grad():
+                    for val_iteration, batch in enumerate(mp_val_dataloader):
+                        images = batch['pixel_values'].to(device)
+                        labels = batch['labels'].to(device)
+                        logits = model(images)
+                        loss = criterion(logits, labels)
 
-                    global_validation_accuracy = xm.mesh_reduce(
-                        'accuracy', (logits.argmax(
-                            dim=-1) == batch["labels"]).float().mean(),
-                        lambda x: sum(x) / len(x))
-                    global_validation_loss = xm.mesh_reduce(
-                        'global_loss', loss, lambda x: sum(x) / len(x))
-                    validation_accuracies += [
-                        global_validation_accuracy.item()
-                    ]
-                    validation_losses += [global_validation_loss.item()]
+                        global_validation_accuracy = xm.mesh_reduce(
+                            'accuracy', (logits.argmax(
+                                dim=-1) == batch["labels"]).float().mean(),
+                            lambda x: sum(x) / len(x))
+                        global_validation_loss = xm.mesh_reduce(
+                            'global_loss', loss, lambda x: sum(x) / len(x))
+                        validation_accuracies += [
+                            global_validation_accuracy.item()
+                        ]
+                        validation_losses += [global_validation_loss.item()]
 
-                    if xm.is_master_ordinal():
-                        val_progress_bar.set_description(
-                            'Train Step: {} | Validation Step {}/{} | Mean Validation Loss: {:.3f} | Mean Validation Accuracy: {:.3f}'
-                            .format(train_iteration, val_iteration + 1,
-                                    len(mp_val_dataloader),
-                                    float(np.mean(validation_losses)),
-                                    float(np.mean(validation_accuracies))))
-                        val_progress_bar.update(1)
+                        if xm.is_master_ordinal():
+                            val_progress_bar.set_description(
+                                'Train Step: {} | Validation Step {}/{} | Mean Validation Loss: {:.3f} | Mean Validation Accuracy: {:.3f}'
+                                .format(train_iteration, val_iteration + 1,
+                                        len(mp_val_dataloader),
+                                        float(np.mean(validation_losses)),
+                                        float(np.mean(validation_accuracies))))
+                            val_progress_bar.update(1)
 
                 if xm.is_master_ordinal():
                     train_progress_bar = tqdm(initial=train_iteration,
                                               total=total_train_iterations)
                     val_progress_bar.close()
+                model.train()
 
     if xm.is_master_ordinal():
         train_progress_bar.close()
