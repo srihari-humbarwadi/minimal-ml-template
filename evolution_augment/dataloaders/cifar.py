@@ -11,7 +11,7 @@ from mlproject.utils import get_logger
 from evolution_augment.transforms import CutoutDefault
 from evolution_augment.dataloaders import DataloaderFactory
 
-if 'XRT_TPU_CONFIG' in os.environ:
+if 'XRT_TPU_CONFIG' in os.environ or 'PJRT_DEVICE' in os.environ:
     print('XLA config detected')
     is_xla = True
     import torch_xla.core.xla_model as xm
