@@ -25,6 +25,91 @@ os.environ['XRT_TPU_CONFIG'] = 'localservice;0;localhost:51011'
 os.environ['XLA_USE_BF16'] = '1'
 
 
+def _reduce_fn(x):
+    return sum(x) / len(x)
+
+
+def _train_step(images, labels, model, loss_fn, optimizer, scheduler):
+    model.train()
+    optimizer.zero_grad()
+    logits = model(images)
+    loss = loss_fn(logits, labels)
+    loss.backward()
+    accuracy = (logits.argmax(dim=-1) == labels).float().mean()
+    xm.optimizer_step(optimizer, barrier=True)
+    scheduler.step()
+
+    global_accuracy = xm.mesh_reduce('accuracy', accuracy, _reduce_fn)
+    global_loss = xm.mesh_reduce('global_loss', loss, _reduce_fn)
+    return global_loss, global_accuracy
+
+
+def _train_one_epoch(dataloader, model, loss_fn, optimizer, scheduler,
+                     progress_bar, completed_steps):
+    device = xm.xla_device()
+
+    losses = []
+    accuracies = []
+    for step, batch in enumerate(dataloader):
+        images = batch['pixel_values']
+        labels = batch['labels']
+        loss, accuracy = _train_step(images=images,
+                                     labels=labels,
+                                     model=model,
+                                     loss_fn=loss_fn,
+                                     optimizer=optimizer,
+                                     scheduler=scheduler)
+        losses += [loss.detach().item()]
+        accuracies += [accuracy.detach().item()]
+        mean_loss = _reduce_fn(losses)
+        mean_accuracy = _reduce_fn(accuracies)
+        if xm.is_master_ordinal():
+            step_logs = dict(train_step=completed_steps + step + 1,
+                             loss=round(loss.detach().item(), 3),
+                             accuracy=round(accuracy.detach().item(), 3),
+                             learning_rate=round(scheduler.get_last_lr()[0],
+                                                 4))
+            progress_bar.set_description(str(step_logs))
+            progress_bar.update(1)
+    return mean_loss, mean_accuracy
+
+
+def _validation_step(images, labels, model, loss_fn):
+    model.eval()
+    logits = model(images)
+    loss = loss_fn(logits, labels)
+    accuracy = (logits.argmax(dim=-1) == labels).float().mean()
+    global_accuracy = xm.mesh_reduce('accuracy', accuracy, _reduce_fn)
+    global_loss = xm.mesh_reduce('global_loss', loss, _reduce_fn)
+    return global_loss, global_accuracy
+
+
+def _validate(dataloader, model, loss_fn, progress_bar, train_step):
+    device = xm.xla_device()
+    losses = []
+    accuracies = []
+    for step, batch in enumerate(dataloader):
+        images = batch['pixel_values']
+        labels = batch['labels']
+        loss, accuracy = _validation_step(images=images,
+                                          labels=labels,
+                                          model=model,
+                                          loss_fn=loss_fn)
+        losses += [loss.detach().item()]
+        accuracies += [accuracy.detach().item()]
+        mean_loss = _reduce_fn(losses)
+        mean_accuracy = _reduce_fn(accuracies)
+        if xm.is_master_ordinal():
+            step_logs = dict(train_step=train_step,
+                             validation_step=step + 1,
+                             loss=round(loss.detach().item(), 3),
+                             accuracy=round(accuracy.detach().item(), 3))
+            progress_bar.update(1)
+            progress_bar.set_description(str(step_logs))
+
+    return mean_loss, mean_accuracy
+
+
 def mp_fn(index, experiment_cfg):
     print('Starting process on rank:', index)
     device = xm.xla_device()
@@ -37,7 +122,7 @@ def mp_fn(index, experiment_cfg):
 
     set_seed(42)
 
-    print('Using learning rata:', experiment_cfg.trainers.optimizer.lr)
+    print('Using learning rate:', experiment_cfg.trainers.optimizer.lr)
     model = models.ModelFactory.build(config=experiment_cfg.model).to(device)
 
     optimizer = optimizers.get_optimizer(
@@ -48,94 +133,67 @@ def mp_fn(index, experiment_cfg):
     train_dataloader = dataloaders.DataloaderFactory.build(
         experiment_cfg.train_dataloader)
 
-    mp_train_dataloader = pl.MpDeviceLoader(train_dataloader, device)
+    mp_train_dataloader = pl.MpDeviceLoader(
+        train_dataloader,
+        device,
+        loader_prefetch_size=16,
+        device_prefetch_size=16,
+        host_to_device_transfer_threads=8,
+    )
 
     val_dataloader = dataloaders.DataloaderFactory.build(
         experiment_cfg.val_dataloaders)
     mp_val_dataloader = pl.MpDeviceLoader(val_dataloader, device)
 
-    criterion = CrossEntropyLoss()
+    loss_fn = CrossEntropyLoss()
 
-    train_iteration = 0
-    total_train_iterations = experiment_cfg.train_iters
+    train_step = 0
+    total_train_iterations = experiment_cfg.epochs * len(mp_train_dataloader)
 
-    if xm.is_master_ordinal():
-        train_progress_bar = tqdm(initial=train_iteration,
-                                  total=total_train_iterations)
+    train_progress_bar = None
+    validation_progress_bar = None
+    for _epoch in range(experiment_cfg.epochs):
+        if xm.is_master_ordinal():
+            train_progress_bar = tqdm(initial=train_step,
+                                      total=total_train_iterations)
+        train_epoch_loss, train_epoch_accuracy = _train_one_epoch(
+            dataloader=mp_train_dataloader,
+            model=model,
+            loss_fn=loss_fn,
+            optimizer=optimizer,
+            scheduler=lr_sched,
+            progress_bar=train_progress_bar,
+            completed_steps=train_step)
+        train_step += len(mp_train_dataloader)
+        if xm.is_master_ordinal():
+            train_progress_bar.close()
+            epoch_logs = dict(epoch='[{}/{}]'.format(_epoch + 1,
+                                                     experiment_cfg.epochs),
+                              train_loss=round(train_epoch_loss, 3),
+                              train_accuracy=round(train_epoch_accuracy, 3))
 
-    while train_iteration < total_train_iterations:
-        for batch in mp_train_dataloader:
-            optimizer.zero_grad()
-            images = batch['pixel_values'].to(device)
-            labels = batch['labels'].to(device)
-            logits = model(images)
-            loss = criterion(logits, labels)
-            loss.backward()
-
-            xm.optimizer_step(optimizer, barrier=True)
-            lr_sched.step()
-            train_iteration += 1
-
-            global_train_accuracy = xm.mesh_reduce(
-                'accuracy',
-                (logits.argmax(dim=-1) == batch["labels"]).float().mean(),
-                lambda x: sum(x) / len(x))
-            global_train_loss = xm.mesh_reduce('global_loss', loss,
-                                               lambda x: sum(x) / len(x))
-
+        if (_epoch + 1) % 10 == 0:
             if xm.is_master_ordinal():
-                train_progress_bar.set_description(
-                    'Rank: {} | Step: {}/{} | Loss: {:.3f} | LR: {:.4f} | Accuracy: {:.3f}'
-                    .format(index, train_iteration, total_train_iterations,
-                            global_train_loss.item(),
-                            lr_sched.get_last_lr()[0], global_train_accuracy))
-                train_progress_bar.update(1)
+                validation_progress_bar = tqdm(total=len(mp_val_dataloader))
+            with torch.no_grad():
+                validation_loss, validation_accuracy = _validate(
+                    dataloader=mp_val_dataloader,
+                    model=model,
+                    loss_fn=loss_fn,
+                    progress_bar=validation_progress_bar,
+                    train_step=train_step)
+            if xm.is_master_ordinal():
+                validation_progress_bar.close()
+                epoch_logs = dict(**epoch_logs,
+                                  validation_loss=round(validation_loss, 3),
+                                  validation_accuracy=round(
+                                      validation_accuracy, 3))
 
-            if train_iteration % experiment_cfg.evaluate_every_n_steps == 0:
-                model.eval()
+        if xm.is_master_ordinal():
+            print(epoch_logs)
 
-                if xm.is_master_ordinal():
-                    train_progress_bar.close()
-                    val_progress_bar = tqdm(total=len(mp_val_dataloader))
 
-                validation_accuracies = []
-                validation_losses = []
-                with torch.no_grad():
-                    for val_iteration, batch in enumerate(mp_val_dataloader):
-                        images = batch['pixel_values'].to(device)
-                        labels = batch['labels'].to(device)
-                        logits = model(images)
-                        loss = criterion(logits, labels)
-
-                        global_validation_accuracy = xm.mesh_reduce(
-                            'accuracy', (logits.argmax(
-                                dim=-1) == batch["labels"]).float().mean(),
-                            lambda x: sum(x) / len(x))
-                        global_validation_loss = xm.mesh_reduce(
-                            'global_loss', loss, lambda x: sum(x) / len(x))
-                        validation_accuracies += [
-                            global_validation_accuracy.item()
-                        ]
-                        validation_losses += [global_validation_loss.item()]
-
-                        if xm.is_master_ordinal():
-                            val_progress_bar.set_description(
-                                'Train Step: {} | Validation Step {}/{} | Mean Validation Loss: {:.3f} | Mean Validation Accuracy: {:.3f}'
-                                .format(train_iteration, val_iteration + 1,
-                                        len(mp_val_dataloader),
-                                        float(np.mean(validation_losses)),
-                                        float(np.mean(validation_accuracies))))
-                            val_progress_bar.update(1)
-
-                if xm.is_master_ordinal():
-                    train_progress_bar = tqdm(initial=train_iteration,
-                                              total=total_train_iterations)
-                    val_progress_bar.close()
-                model.train()
-
-    if xm.is_master_ordinal():
-        train_progress_bar.close()
-        xm.save(model.state_dict(), './model.pt')
+    xm.save(model.state_dict(), './model.pth', master_only=True)
 
 
 if __name__ == '__main__':
