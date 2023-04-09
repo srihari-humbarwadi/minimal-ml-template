@@ -143,6 +143,7 @@ class Experiment:
     checkpoint_after_validation: bool = True
     train_iters: int = 1000
     resume: bool = True
+    epochs: int = 0
 
 
 def wideresnet28x18_randaugment_cifar10_bs256_ep200():
@@ -193,6 +194,7 @@ def wideresnet28x18_randaugment_cifar10_bs256_ep200():
                                   num_warmup_steps=warmup_iters),
             scheduler_interval=callbacks.Interval.STEP),
         train_iters=train_iters,
+        epochs=epochs,
         evaluate_every_n_steps=200,
         checkpoint_every_n_steps=int(train_iters / 10),
         checkpoint_after_validation=False)
@@ -249,6 +251,7 @@ def wideresnet28x18_randaugment_cifar100_bs256_ep200():
                                   num_warmup_steps=warmup_iters),
             scheduler_interval=callbacks.Interval.STEP),
         train_iters=train_iters,
+        epochs=epochs,
         evaluate_every_n_steps=200,
         checkpoint_every_n_steps=int(train_iters / 10),
         checkpoint_after_validation=False)
@@ -264,8 +267,8 @@ def wideresnet28x18_randaugment_cifar10_bs256_ep200_tpu():
                       num_val_samples=10000,
                       image_means=(0.4914, 0.4822, 0.4465),
                       image_stds=(0.2023, 0.1994, 0.2010))
-    train_batch_size = int(256 / 8)
-    val_batch_size = 8
+    train_batch_size = int(128 / 8)
+    val_batch_size = 1
 
     epochs = 200
     train_iters = math.ceil(epochs * dataset.num_train_samples / train_batch_size / 8)
@@ -304,6 +307,7 @@ def wideresnet28x18_randaugment_cifar10_bs256_ep200_tpu():
                                   num_warmup_steps=warmup_iters),
             scheduler_interval=callbacks.Interval.STEP),
         train_iters=train_iters,
+        epochs=epochs,
         evaluate_every_n_steps=500,
         checkpoint_every_n_steps=int(train_iters / 10),
         checkpoint_after_validation=False)
